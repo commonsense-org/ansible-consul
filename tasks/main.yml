@@ -8,13 +8,13 @@
   include_vars: "{{ ansible_os_family }}.yml"
 
 - name: Include consul user and group creation tasks
-  include: user_group.yml
+  import_tasks: user_group.yml
 
 - name: Include consul installation tasks for Debian
-  include: "install.yml"
+  import_tasks: "install.yml"
 
 - name: Include consul configurations tasks
-  include: configure.yml
+  import_tasks: configure.yml
 
 - name: Include dns install and configurations tasks
-  include: dns.yml
+  import_tasks: dns.yml
