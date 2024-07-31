@@ -1,196 +1,173 @@
 ---
-- name: update apt
-  apt: >
-    update_cache=yes
-    cache_valid_time=3600
-  when: ansible_os_family == "Debian"
 
-- name: install deps (Ubuntu)
-  apt: >
-    pkg={{item}}
-    state=installed
-  with_items:
-    - unzip
-    - jq
-  when: ansible_os_family == "Debian"
+### Directories creation
+- name: Ensure consul directories have been created
+  block:
+  - name: Ensure configuration and data directories have been created
+    file:
+      dest: "{{ item }}"
+      state: directory
+      owner: "{{ consul_user }}"
+      group: "{{ consul_group }}"
+      mode: 0700
+    with_items:
+      - "{{ consul_config_path }}"
+      - "{{ consul_data_path }}"
+  - name: Ensure run directory has been created
+    file:
+      dest: "{{ consul_run_path }}"
+      state: directory
+      owner: "{{ consul_user }}"
+      group: "{{ consul_group }}"
+      mode: 0750
 
-- name: install deps (RHEL)
-  yum: >
-    pkg={{item}}
-    state=installed
-  with_items:
-    - unzip
-    - jq
-  when: ansible_os_family == "RedHat"
+- name: Ensure log directory is created if syslog logging is disabled
+  file:
+    dest: "{{ consul_log_path }}"
+    state: directory
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+  when:
+    - not consul_syslog_enable | bool
+    - not consul_configure_syslogd | bool
 
-- name: check archive stat
-  stat: path={{ consul_download_folder }}/{{ consul_archive }}
-  register: consul_archive_stat
+- name: Ensure binary path has been created
+  file:
+    path: "{{ consul_bin_path }}"
+    state: directory
+    owner: root
+    mode: 0755
 
-- name: download consul
-  get_url: >
-    url={{consul_download}}
-    dest={{consul_download_folder}}
-    url_username={{ consul_download_username }}
-    url_password={{ consul_download_password }}
-  register: consul_was_downloaded
-  when: consul_archive_stat.stat.exists == False
+### Consul installation steps
+- name: Install OS packages
+  package:
+    name: "{{ item }}"
+    state: present
+  with_items: "{{ consul_os_packages }}"
 
-- name: create consul group
-  group: >
-    name={{consul_group}}
-    state=present
-  register: consul_group_created
+- name: Read package checksum file
+  stat:
+    path: "{{ role_path }}/files/consul_{{ consul_version }}_SHA256SUMS"
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+  run_once: true
+  ignore_errors: yes
+  register: consul_checksum
+  delegate_to: 127.0.0.1
 
-- name: create consul user
-  user: >
-    home={{consul_home}}
-    name={{consul_user}}
-    group={{consul_group}}
-    system=yes
-  when: consul_group_created|changed
+- name: Download package checksum file
+  get_url:
+    url: "{{ consul_checksum_file_url }}"
+    dest: "{{ role_path }}/files/consul_{{ consul_version }}_SHA256SUMS"
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+  run_once: true
+  when: not consul_checksum.stat.exists | bool
+  delegate_to: 127.0.0.1
 
-- name: create consul directory
-  file: >
-    state=directory
-    path={{ item }}
-    owner={{consul_user}}
-    group={{consul_group}}
-  with_items:
-    - "{{ consul_home }}"
-    - "{{ consul_home }}/bin"
-    - "{{ consul_home }}/cert"
-    - "{{ consul_data_dir }}"
-    - "{{ consul_config_dir }}"
+- name: Read package checksum
+  shell: grep "{{ consul_pkg }}" "{{ role_path }}/files/consul_{{ consul_version }}_SHA256SUMS" | awk '{print $1}'
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+  register: consul_sha256
+  run_once: true
+  delegate_to: 127.0.0.1
 
-# Check before creating log dir to prevent aggressively overwriting permissions
-- name: check for consul log directory
-  stat: >
-    path={{ consul_log_file|dirname }}
-  register: logdir
+- name: Check Consul package file
+  stat:
+    path: "{{ role_path }}/files/{{ consul_pkg }}"
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+  register: consul_package
+  run_once: true
+  delegate_to: 127.0.0.1
 
-- name: create log directory if it does not exist
-  file: >
-    state=directory
-    path={{ consul_log_file|dirname }}
-    owner={{ consul_user }}
-    group={{ consul_group }}
-  when: not logdir.stat.exists
+- name: Download Consul package
+  get_url:
+    url: "{{ consul_zip_url }}"
+    dest: "{{ role_path }}/files/{{ consul_pkg }}"
+    checksum: "sha256:{{ consul_sha256.stdout }}"
+    timeout: "42"
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+  when: not consul_package.stat.exists | bool
+  run_once: true
+  delegate_to: 127.0.0.1
 
-- name: touch the log file
-  file: >
-    state=touch
-    path={{ consul_log_file }}
-    owner={{ consul_user }}
-    group={{ consul_group }}
-  changed_when: false
+- name: Create Temporary Directory for Extraction
+  tempfile:
+    state: directory
+    prefix: ansible-consul.
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+  register: install_temp
+  run_once: true
+  delegate_to: 127.0.0.1
 
-- name: copy and unpack
-  unarchive: >
-    src={{ consul_download_folder }}/{{ consul_archive }}
-    dest={{ consul_home }}/bin
-    copy=no
-  when: consul_was_downloaded|changed
+- name: Unarchive Consul package
+  unarchive:
+    src: "{{ role_path }}/files/{{ consul_pkg }}"
+    dest: "{{ install_temp.path }}/"
+    creates: "{{ install_temp.path }}/consul"
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+  delegate_to: 127.0.0.1
 
-- name: create TLS key
-  no_log: True
-  copy: >
-    content="{{ consul_tls_key }}"
-    dest="{{ consul_key_file }}"
-    owner={{consul_user}}
-    group={{consul_group}}
-    mode=0600
-  when: consul_tls_key is defined
-
-- name: create TLS cert
-  no_log: True
-  copy: >
-    content="{{ consul_tls_cert }}"
-    dest="{{ consul_cert_file }}"
-    owner={{consul_user}}
-    group={{consul_group}}
-    mode=0600
-  when: consul_tls_cert is defined
-
-- name: create TLS root CA cert
-  no_log: True
-  copy: >
-    content="{{ consul_tls_ca_cert }}"
-    dest="{{ consul_ca_file }}"
-    owner={{consul_user}}
-    group={{consul_group}}
-    mode=0600
-  when: consul_tls_ca_cert is defined
-
-- name: set ownership
-  file: >
-    state=directory
-    path={{consul_home}}
-    owner={{consul_user}}
-    group={{consul_group}}
-    recurse=yes
-  when: consul_was_downloaded|changed
-
-- name: copy consul upstart script
-  template: >
-    src={{consul_upstart_template}}
-    dest=/etc/init/consul.conf
-    owner={{consul_user}}
-    group={{consul_group}}
-    mode=0755
-  when: consul_use_upstart and ansible_os_family == "Debian"
+- name: Install Consul
+  copy:
+    src: "{{ install_temp.path }}/consul"
+    dest: "{{ consul_bin_path }}/consul"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0755
   notify:
     - restart consul
 
-- name: copy consul systemd script
-  template: >
-    src={{consul_systemd_template}}
-    dest=/etc/systemd/system/consul.service
-    owner={{consul_user}}
-    group={{consul_group}}
-    mode=0755
-  when: consul_use_systemd
-  notify:
-    - reload systemd
-    - restart consul
+- name: Cleanup
+  file:
+    path: "{{ install_temp.path }}"
+    state: "absent"
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+  tags: installation
+  run_once: true
+  delegate_to: 127.0.0.1
 
-- name: copy consul init.d script
-  template: >
-    src={{consul_initd_template}}
-    dest=/etc/init.d/consul
-    owner={{consul_user}}
-    group={{consul_group}}
-    mode=0755
-  when: consul_use_initd
-  notify:
-    - restart consul
+- name: Ensure service systemd script has been defined
+  template:
+    src: consul_systemd.service.j2
+    dest: /lib/systemd/system/consul.service
+    owner: root
+    group: root
+    mode: 0644
+  register: systemd_unit
+  notify: restart consul
+  when:
+    - ansible_service_mgr == "systemd"
 
-- name: add consul to path through profile.d
-  template: >
-    src=consul.sh.j2
-    dest=/etc/profile.d/consul.sh
-    owner=root
-    group=root
-    mode=0755
+- name: Reload systemd
+  systemd:
+    daemon_reload: true
+  when: systemd_unit is changed
 
-- name: copy consulkv script
-  template: >
-    src=consulkv.j2
-    dest={{consul_home}}/bin/consulkv
-    owner={{consul_user}}
-    group={{consul_group}}
-    mode=0755
-
-- name: consul config file
-  template: >
-    src=consul.json.j2
-    dest={{ consul_config_file }}
-    owner={{consul_user}}
-    group={{consul_group}}
-    mode=0755
-  notify:
-    - restart consul
-
-- name: add CONSUL_RPC_ADDR to .bashrc
-  sudo: false
-  lineinfile: dest=~/.bashrc insertbefore=BOF regexp='^export CONSUL_RPC_ADDR' line='export CONSUL_RPC_ADDR="{{ consul_client_address }}:{{ consul_port_rpc }}"'
+- name: Start Consul
+  service:
+    name: consul
+    state: started
+    enabled: true

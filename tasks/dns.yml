@@ -1,0 +1,73 @@
+- name: update apt
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: install deps (Ubuntu)
+  apt:
+    pkg: "{{ item }}"
+    state: present
+  with_items:
+    - dnsmasq
+    - resolvconf
+  when: ansible_os_family == "Debian"
+
+- name: edit resolved.conf
+  lineinfile:
+    dest: "/etc/systemd/resolved.conf"
+    regexp: "^#DNSStubListener="
+    line: "DNSStubListener=no"
+    state: present
+  notify:
+    - restart systemd-resolved
+
+- name: ensure configure directory
+  file:
+    dest: /etc/resolvconf/resolv.conf.d
+    state: directory
+  when: ansible_os_family == 'Debian'
+
+- name: add local dns lookup
+  lineinfile:
+    insertbefore: BOF
+    state: present
+    line: "nameserver 127.0.0.1"
+    dest: "/etc/resolvconf/resolv.conf.d/consul"
+    create: yes
+  when: ansible_os_family == 'Debian'
+
+- name: configure dnsmasq to listen on interface(s)
+  lineinfile:
+    regexp: "^interface={{ item }}"
+    line: "interface={{ item }}"
+    dest: /etc/dnsmasq.conf
+  with_items:
+    "{{ ansible_interfaces|reject('match', 'veth')|list}}"
+  notify:
+    - restart dnsmasq
+
+- name: configure dnsmasq to disable DHCP and TFTP
+  lineinfile:
+    regexp: "^no-dhcp-interface={{ item }}"
+    line: "no-dhcp-interface={{ item }}"
+    dest: /etc/dnsmasq.conf
+  with_items:
+    "{{ ansible_interfaces|reject('match', 'veth')|list}}"
+  notify:
+    - restart dnsmasq
+
+- name: configure dnsmasq to delegate all Consul DNS requests to the Consul DNS port
+  copy:
+    content: | 
+      server=/{{ consul_domain }}/127.0.0.1#{{ consul_ports.dns }}
+      no-resolv
+      server=1.1.1.1
+      server=1.0.0.1
+      listen-address=127.0.0.1
+      listen-address=172.17.0.1
+    dest: /etc/dnsmasq.d/10-consul
+  notify:
+    - restart dnsmasq
+
+- pause: minutes=1

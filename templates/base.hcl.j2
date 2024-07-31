@@ -1,0 +1,59 @@
+#---------------------------------------
+# GLOBAL SETTINGS
+#---------------------------------------
+datacenter = "{{ consul_datacenter }}"
+domain = "{{ consul_domain }}"
+
+{% if consul_node_role == "server" %}
+retry_join = [{% for host in consul_servers | difference(ansible_all_ipv4_addresses) %}"{{host}}"{% if not loop.last %}, {% endif %}{% endfor %}]
+{% else %}
+retry_join = {{ consul_servers | to_json }}
+{% endif %}
+rejoin_after_leave = false
+performance {
+  raft_multiplier = {{ consul_raft_multiplier }}
+}
+
+bind_addr = "{{ consul_bind_address }}"
+advertise_addr = "{{ consul_advertise_address }}"
+
+client_addr = "{{ consul_client_address }}"
+addresses = {
+  dns = "{{ consul_addresses.dns }}"
+  http = "{{ consul_addresses.http }}"
+  https = "{{ consul_addresses.https }}"
+  grpc = "{{ consul_addresses.grpc }}" 
+  {% if consul_version is version_compare('0.8.0', '<') %}
+  rpc = "{{ consul_addresses.rpc }}"
+  {% endif %}
+}
+
+#---------------------------------------
+# GOSSIP ENCRYPTION
+#---------------------------------------
+{% if consul_encrypt_verify_incoming | bool or consul_encrypt_verify_outgoing | bool %}
+encrypt = "{{ consul_encrypt_key }}"
+{% endif %}
+encrypt_verify_incoming = {{ consul_encrypt_verify_incoming | lower }}
+encrypt_verify_outgoing = {{ consul_encrypt_verify_outgoing | lower }}
+enable_local_script_checks = {{ enable_local_script_checks | lower }}
+
+#---------------------------------------
+# ACL CONFIG
+#---------------------------------------
+{% if acl_enable | bool %}
+acl = {
+  enabled = true
+  default_policy = "{{ acl_default_policy }}" 
+  enable_token_persistence = {{ acl_token_persistence_enable | lower }} 
+  tokens = {
+    default = "{{ default_acl_token }}"
+  }
+}
+{% endif %}
+
+#---------------------------------------
+# LOGGING
+#---------------------------------------
+log_file = "{{ consul_log_path }}/{{ consul_log_file }}"
+enable_syslog = false

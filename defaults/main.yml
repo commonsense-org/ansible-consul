@@ -1,95 +1,120 @@
 ---
-consul_version: 0.6.0
-consul_archive: "consul_{{ consul_version }}_linux_amd64.zip"
-consul_download: "https://releases.hashicorp.com/consul/{{ consul_version }}/{{ consul_archive }}"
-consul_download_username: ""
-consul_download_password: ""
-consul_download_folder: /tmp
+# defaults file for ansible-consul
 
-consul_is_ui: false
-consul_ui_archive: "consul_{{ consul_version }}_web_ui.zip"
-consul_ui_download: "https://releases.hashicorp.com/consul/{{ consul_version }}/{{ consul_ui_archive }}"
-consul_ui_dir: "{{ consul_home }}/dist"
-consul_ui_server_name: "{{ ansible_fqdn }}"
-consul_ui_require_auth: false
-consul_ui_nginx_template: "consul-nginx.conf.j2"
-consul_ui_auth_user_file: /etc/htpasswd/consul
-consul_ui_server_port: 80
-consul_install_nginx: true
-consul_install_nginx_config: true
-consul_enable_nginx_config: true
+# Consul Enterprise
+consul_enterprise: false
 
-consul_install_consul_cli: false
-consul_cli_archive: "master.zip"
-consul_cli_download: "https://github.com/CiscoCloud/consul-cli/archive/{{ consul_cli_archive }}"
+### Package
+consul_version: "1.14.1"
+consul_architecture_map:
+  amd64: amd64
+  x86_64: amd64
+  armv6l: armhfv6
+  armv7l: armhfv6
+  aarch64: arm64
+  32-bit: "386"
+  64-bit: amd64
+consul_architecture: "{{ consul_architecture_map[ansible_architecture] }}"
+consul_os: "\
+  {% if ansible_os_family == 'Windows' %}\
+    {{ 'windows' }}\
+  {% else %}\
+    {{ ansible_system | lower }}\
+  {% endif %}"
+consul_pkg: "consul_{{ consul_version }}{{ '+ent' if consul_enterprise else '' }}_{{ consul_os }}_{{ consul_architecture }}.zip"
+consul_zip_url: "https://releases.hashicorp.com/consul/{{ consul_version }}{{ '+ent' if consul_enterprise else '' }}/{{ consul_pkg }}"
+consul_checksum_file_url: "https://releases.hashicorp.com/consul/{{ consul_version }}{{ '+ent' if consul_enterprise else '' }}/consul_{{ consul_version}}{{ '+ent' if consul_enterprise else '' }}_SHA256SUMS"
 
-consul_home: /opt/consul
-consul_config_dir: /etc/consul.d
-consul_config_file: /etc/consul.conf
-consul_log_file: /var/log/consul
-consul_data_dir: "{{ consul_home }}/data"
+### Paths
+consul_bin_path: "/usr/local/bin"
+consul_config_path: "/etc/consul.d"
+consul_data_path: "/var/consul"
+consul_log_path: "/var/log/consul"
+consul_log_file: "consul.log"
+consul_run_path: "/var/run/consul"
+consul_binary: "{{ consul_bin_path }}/consul"
+consul_tmp_path: "/var/tmp/"
 
-consul_dns_allow_stale: false
-consul_dns_max_stale: 5s
-consul_dns_node_ttl: 0s
-consul_dns_service_ttl: 0s
-consul_dns_enable_truncate: false
-consul_dns_only_passing: false
+### Log user, group, facility
+consul_syslog_enable: false
+consul_configure_syslogd: false
 
-consul_upstart_template: "consul.conf.j2"
-consul_systemd_template: "consul.systemd.j2"
-consul_initd_template: "consul.initd.sh.j2"
+### Consul user and group settings
+consul_user: "consul"
+consul_group: "consul"
 
-consul_binary: consul
+### Consul settings
+consul_datacenter: "dc1"
+consul_domain: "consul"
+consul_node_name: "{{ ansible_fqdn }}"
+consul_node_role: "client"
+consul_bootstrap_expect: 3
+consul_servers: []
+consul_recursors: []
+consul_ui: true
 
-consul_user: consul
-consul_group: consul
+### Addresses
+consul_bind_address: "{{ ansible_default_ipv4.address }}"
+consul_advertise_address: "{{ consul_bind_address }}"
+consul_client_address: '127.0.0.1'
+consul_addresses:
+  dns: "{{ consul_addresses_dns | default(consul_client_address, true) }}"
+  http: "{{ consul_addresses_http | default(consul_client_address, true) }}"
+  https: "{{ consul_addresses_https | default(consul_client_address, true) }}"
+  rpc: "{{ consul_addresses_rpc | default(consul_client_address, true) }}"
+  grpc: "{{ consul_addresses_grpc | default(consul_client_address, true) }}"
 
-consul_use_systemd: false
-consul_use_upstart: true
-consul_use_initd: false
+### Ports
+consul_ports:
+  dns: "{{ consul_ports_dns | default('8600', true) }}"
+  http: "{{ consul_ports_http | default('8500', true) }}"
+  https: "{{ consul_ports_https | default('-1', true) }}"
+  rpc: "{{ consul_ports_rpc | default('8400', true) }}"
+  serf_lan: "{{ consul_ports_serf_lan | default('8301', true) }}"
+  serf_wan: "{{ consul_ports_serf_wan | default('8302', true) }}"
+  server: "{{ consul_ports_server | default('8300', true) }}"
+  grpc: "{{ consul_ports_grpc | default('-1', true) }}"
 
-consul_is_server: false
+### Consul performance
+consul_raft_multiplier: 1
 
-consul_domain: consul.
+### Encryption
+consul_encrypt_key: ""
+consul_encrypt_verify_incoming : false
+consul_encrypt_verify_outgoing : false
 
-consul_servers: ['127.0.0.1']
-consul_log_level: "INFO"
-consul_syslog: false
-consul_rejoin_after_leave: true
-consul_leave_on_terminate: false
+### Script checks
+enable_local_script_checks: true
 
-consul_join_at_start: false
-consul_retry_join: false
-consul_retry_interval: 30s
-consul_retry_max: 0
+### acl option
+acl_enable: false
+acl_default_policy: "allow"
+acl_token_persistence_enable: true
+default_acl_token: ""
 
-consul_servers_wan: []
-consul_join_wan: false
-consul_retry_join_wan: false
-consul_retry_interval_wan: 30s
-consul_retry_max_wan: 0
-consul_advertise_address_wan: false
+# connect
+consul_connect: true
 
-consul_bind_address: "0.0.0.0"
-consul_dynamic_bind: false
-consul_client_address: "127.0.0.1"
+# metrics (enabled on consul servers)
+metrics_provider_enabled: true
+metrics_provider: "prometheus"
 
-consul_client_address_bind: false
-consul_datacenter: "default"
-consul_disable_remote_exec: true
+# wan federation
+wan_federation: false
+primary_datacenter: "dc1"
+consul_advertise_address_wan: "{{ consul_bind_address }}"
 
-consul_port_dns: 8600
-consul_port_http: 8500
-consul_port_https: -1
-consul_port_rpc: 8400
-consul_port_serf_lan: 8301
-consul_port_serf_wan: 8302
-consul_port_server: 8300
-
-consul_install_dnsmasq: false
-consul_install_consulate: false
-
-consul_node_name: "{{ inventory_hostname }}"
-# Set to true to enable hostname verification via TLS
-consul_verify_server_hostname: false
+# dnsmasq
+consul_dnsmasq_upstream_template: "resolv_dnsmasq.conf.j2"
+consul_dnsmasq:
+  listen_interface:
+    - lo
+    - docker0
+    - eth0
+  no_dhcp_interface:
+    - lo
+    - docker0
+    - eth0
+  upstream_servers:
+    - 1.1.1.1
+    - 1.0.0.1

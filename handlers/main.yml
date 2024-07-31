@@ -1,14 +1,20 @@
 ---
-- name: restart consul
-  action: service name=consul state=restarted enabled=yes
+# handlers file for ansible-consul
 
-- name: reload consul config
-  sudo: yes
-  command: pkill -1 consul
+- name: restart consul on Linux
+  service:
+    name: consul
+    state: restarted
+  when: ansible_os_family != "Windows"
+  listen: 'restart consul'
 
-- name: reload systemd
-  sudo: yes
-  command: systemctl daemon-reload
+- name: restart systemd-resolved
+  service: name=systemd-resolved state=restarted enabled=yes
+  listen: 'restart systemd-resolved'
 
 - name: restart dnsmasq
   service: name=dnsmasq state=restarted enabled=yes
+  listen: 'restart dnsmasq'
+
+- name: reload consul
+  command: /usr/local/bin/consul reload

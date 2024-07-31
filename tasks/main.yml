@@ -1,7 +1,20 @@
 ---
-- include: install.yml
-- { include: install-ui.yml, when: consul_is_ui == true }
-- { include: install-cli.yml, when: consul_install_consul_cli == true }
-- { include: dnsmasq.yml, when: consul_install_dnsmasq == true }
-- { include: consulate.yml, when: consul_install_consulate == true }
-- include: service.yml
+# tasks file for ansible-consul
+
+# - name: Check requirements
+#   include: asserts.yml
+
+- name: Include OS variables
+  include_vars: "{{ ansible_os_family }}.yml"
+
+- name: Include consul user and group creation tasks
+  include: user_group.yml
+
+- name: Include consul installation tasks for Debian
+  include: "install.yml"
+
+- name: Include consul configurations tasks
+  include: configure.yml
+
+- name: Include dns install and configurations tasks
+  include: dns.yml
